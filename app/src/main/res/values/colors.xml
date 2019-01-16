@@ -3,5 +3,8 @@
     <color name="color_primary">#3F51B5</color>
     <color name="color_primary_dark">#303F9F</color>
     <color name="color_accent">#FF4081</color>
+    <color name="color_backgound">#342D50</color>
+    <color name="color_appbar">#7F7798</color>
+    <color name="color_white">#FFFFFF</color>
 </resources>
 
