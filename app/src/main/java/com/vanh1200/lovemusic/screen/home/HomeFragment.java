@@ -1,7 +1,11 @@
 package com.vanh1200.lovemusic.screen.home;
 
+import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
+import android.content.ServiceConnection;
 import android.os.Bundle;
+import android.os.IBinder;
 import android.support.v4.view.ViewPager;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.LinearLayoutManager;
@@ -12,6 +16,7 @@ import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.bumptech.glide.Glide;
 import com.vanh1200.lovemusic.R;
 import com.vanh1200.lovemusic.base.BaseFragment;
 import com.vanh1200.lovemusic.data.model.Genre;
@@ -22,6 +27,10 @@ import com.vanh1200.lovemusic.data.source.remote.TrackRemoteDataSource;
 import com.vanh1200.lovemusic.screen.genre.GenreDetailActivity;
 import com.vanh1200.lovemusic.screen.home.adapter.SliderAdapter;
 import com.vanh1200.lovemusic.screen.home.adapter.SuggestedTracksAdapter;
+import com.vanh1200.lovemusic.screen.main.MainActivity;
+import com.vanh1200.lovemusic.screen.play.PlayActivity;
+import com.vanh1200.lovemusic.screen.search.SearchFragment;
+import com.vanh1200.lovemusic.service.PlayMusicService;
 import com.vanh1200.lovemusic.utils.Constants;
 
 import java.util.ArrayList;
@@ -30,7 +39,7 @@ import java.util.List;
 public class HomeFragment extends BaseFragment implements HomeContract.View,
         SuggestedTracksAdapter.OnClickSuggestedTracks, View.OnClickListener
         , SliderFragment.OnClickItem {
-    public static HomeFragment sInstance;
+    private static HomeFragment sInstance;
     private ViewPager mViewPager;
     private SliderAdapter mSliderAdapter;
     private SuggestedTracksAdapter mSuggestedTracksAdapter;
@@ -54,6 +63,10 @@ public class HomeFragment extends BaseFragment implements HomeContract.View,
     private Genre mGenreAmbient;
     private Genre mGenreClassical;
     private Genre mGenreCountry;
+    private PlayMusicService mService;
+    private ServiceConnection mConnection;
+    private List<Track> mSuggestedTracks;
+    private List<Track> mSliderTracks;
 
     @Override
     protected int getLayoutResource() {
@@ -80,8 +93,35 @@ public class HomeFragment extends BaseFragment implements HomeContract.View,
         mPresenter = new HomePresenter(mTrackRepository);
         mPresenter.setView(this);
         registerEvents();
-        initDataForSlider();
-        initDataForSuggestedTracks();
+        initServiceConnection();
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        removeServiceConnection();
+    }
+
+    private void removeServiceConnection() {
+        getActivity().unbindService(mConnection);
+    }
+
+    private void initServiceConnection() {
+        mConnection = new ServiceConnection() {
+            @Override
+            public void onServiceConnected(ComponentName name, IBinder service) {
+                mService = ((PlayMusicService.PlayBinder) service).getService();
+                initDataForSlider();
+                initDataForSuggestedTracks();
+            }
+
+            @Override
+            public void onServiceDisconnected(ComponentName name) {
+
+            }
+        };
+        getActivity().bindService(PlayMusicService.getIntent(getActivity()), mConnection,
+                Context.BIND_AUTO_CREATE);
     }
 
     private void initGenres() {
@@ -97,6 +137,25 @@ public class HomeFragment extends BaseFragment implements HomeContract.View,
                 getString(R.string.text_classical), R.drawable.classical);
         mGenreCountry = new Genre(Constants.GENRES_COUNTRY,
                 getString(R.string.text_country), R.drawable.country);
+
+        Glide.with(getActivity())
+                .load(mGenreAllMusic.getImageUrl())
+                .into(mImageAllMusic);
+        Glide.with(getActivity())
+                .load(mGenreAllAudio.getImageUrl())
+                .into(mImageAllAudio);
+        Glide.with(getActivity())
+                .load(mGenreRock.getImageUrl())
+                .into(mImageRock);
+        Glide.with(getActivity())
+                .load(mGenreClassical.getImageUrl())
+                .into(mImageClassical);
+        Glide.with(getActivity())
+                .load(mGenreAmbient.getImageUrl())
+                .into(mImageAmbient);
+        Glide.with(getActivity())
+                .load(mGenreCountry.getImageUrl())
+                .into(mImageCountry);
     }
 
     private void registerEvents() {
@@ -137,6 +196,7 @@ public class HomeFragment extends BaseFragment implements HomeContract.View,
 
     @Override
     public void onFetchDataForSliderSuccess(List<Track> tracks) {
+        mSliderTracks = tracks;
         mSliderAdapter = new SliderAdapter(getChildFragmentManager());
         mFragments = new ArrayList<>();
         for (int i = 0; i < tracks.size(); i++) {
@@ -156,11 +216,13 @@ public class HomeFragment extends BaseFragment implements HomeContract.View,
 
     @Override
     public void onFetchDataForSuggestedSuccess(List<Track> tracks) {
+        mSuggestedTracks = tracks;
         mSuggestedTracksAdapter = new SuggestedTracksAdapter(tracks);
         mSuggestedTracksAdapter.setListener(this);
         mRecyclerSuggestedTracks.setLayoutManager(new LinearLayoutManager(getActivity(),
                 LinearLayoutManager.HORIZONTAL, false));
         mRecyclerSuggestedTracks.setAdapter(mSuggestedTracksAdapter);
+        mRecyclerSuggestedTracks.setNestedScrollingEnabled(false);
     }
 
     @Override
@@ -170,13 +232,18 @@ public class HomeFragment extends BaseFragment implements HomeContract.View,
 
     @Override
     public void onClickTracks(Track track) {
-        Toast.makeText(getActivity(), track.getTitle(), Toast.LENGTH_SHORT).show();
+        mService.addTrack(track);
+        mService.addTracks(mSuggestedTracks);
+        mService.changeTrack(track);
+        ((MainActivity) getActivity()).showMiniPlayer();
+        startActivity(PlayActivity.getIntent(getActivity()));
     }
 
     @Override
     public void onClick(View v) {
         switch (v.getId()) {
             case R.id.text_search:
+                openSearchFragment();
                 break;
             case R.id.text_suggested:
                 break;
@@ -205,6 +272,14 @@ public class HomeFragment extends BaseFragment implements HomeContract.View,
         }
     }
 
+    private void openSearchFragment() {
+        getActivity().getSupportFragmentManager()
+                .beginTransaction()
+                .replace(R.id.frame_main, SearchFragment.newInstance())
+                .addToBackStack(null)
+                .commit();
+    }
+
     private void openGenreDetail(Genre genre) {
         Intent intent = GenreDetailActivity.getIntent(getActivity());
         intent.putExtra(Constants.KEY_INTENT_GENRE, genre);
@@ -213,6 +288,10 @@ public class HomeFragment extends BaseFragment implements HomeContract.View,
 
     @Override
     public void onClickSlide(Track track) {
-        Toast.makeText(getActivity(), track.getTitle(), Toast.LENGTH_SHORT).show();
+        mService.addTrack(track);
+        mService.addTracks(mSliderTracks);
+        mService.changeTrack(track);
+        ((MainActivity) getActivity()).showMiniPlayer();
+        startActivity(PlayActivity.getIntent(getActivity()));
     }
 }
